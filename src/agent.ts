@@ -5,11 +5,28 @@ import * as path from "path";
 
 dotenv.config();
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Exported types ────────────────────────────────────────────────────────────
+
+export interface CollectedArticle {
+  title: string;
+  url: string;
+  source: string;
+  category: string;
+  summary: string;
+  collectedAt: string;
+}
+
+export type AgentEvent =
+  | { type: "search"; query: string }
+  | { type: "fetch"; url: string }
+  | { type: "summarize"; title: string }
+  | { type: "article"; article: CollectedArticle }
+  | { type: "complete"; articles: CollectedArticle[]; savedPath: string }
+  | { type: "error"; message: string };
+
+// ── Internal types ────────────────────────────────────────────────────────────
 
 interface SearchResult {
   title: string;
@@ -24,20 +41,9 @@ interface FetchedArticle {
   url: string;
 }
 
-interface CollectedArticle {
-  title: string;
-  url: string;
-  source: string;
-  category: string;
-  summary: string;
-  collectedAt: string;
-}
-
 // ── Tool implementations ──────────────────────────────────────────────────────
 
 async function webSearch(query: string): Promise<SearchResult[]> {
-  console.log(`  [web_search] "${query}"`);
-
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
 
   const res = await fetch(url, {
@@ -52,7 +58,6 @@ async function webSearch(query: string): Promise<SearchResult[]> {
 
   for (const match of [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 10)) {
     const item = match[1];
-
     const title = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1]?.trim();
     const link  = item.match(/<link>\s*(https?:\/\/[^\s<]+)\s*<\/link>/)?.[1]?.trim();
     const desc  = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1];
@@ -62,9 +67,7 @@ async function webSearch(query: string): Promise<SearchResult[]> {
       results.push({
         title,
         url: link ?? "",
-        snippet: desc
-          ? desc.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200)
-          : "",
+        snippet: desc ? desc.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200) : "",
         source: src ?? "Google News",
       });
     }
@@ -74,35 +77,42 @@ async function webSearch(query: string): Promise<SearchResult[]> {
 }
 
 async function fetchArticle(url: string): Promise<FetchedArticle> {
-  console.log(`  [fetch_article] ${url.slice(0, 80)}...`);
+  // ── Bug fix: never throw — return partial content on any error ────────────
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`  [fetch_article] 接続エラー (${msg.slice(0, 60)}): ${url.slice(0, 60)}`);
+    return { title: url, content: `[接続エラー: ${msg}]`, url };
+  }
 
-  const res = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.5",
-    },
-    signal: AbortSignal.timeout(12_000),
-  });
+  // Non-2xx → return status info instead of throwing; Claude will skip gracefully
+  if (!res.ok) {
+    console.warn(`  [fetch_article] HTTP ${res.status}: ${url.slice(0, 80)}`);
+    return { title: url, content: `[HTTP ${res.status}: 記事を取得できませんでした]`, url };
+  }
 
-  if (!res.ok) throw new Error(`Fetch failed (${res.status}): ${url}`);
+  let html: string;
+  try {
+    html = await res.text();
+  } catch {
+    return { title: url, content: "[レスポンス読み取りエラー]", url };
+  }
 
-  const html = await res.text();
-  const finalUrl = res.url;
-
-  const rawTitle =
-    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? finalUrl;
+  const rawTitle = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? res.url;
 
   const title = rawTitle
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
   const content = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -111,40 +121,27 @@ async function fetchArticle(url: string): Promise<FetchedArticle> {
     .replace(/<header[\s\S]*?<\/header>/gi, " ")
     .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 6_000);
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ").trim().slice(0, 6_000);
 
-  return { title, content, url: finalUrl };
+  return { title, content, url: res.url };
 }
 
-async function summarizeArticle(
-  title: string,
-  content: string
-): Promise<string> {
-  console.log(`  [summarize] "${title.slice(0, 50)}..."`);
-
+async function summarizeArticle(title: string, content: string): Promise<string> {
   const res = await client.messages.create({
     model: "claude-opus-4-6",
     max_tokens: 400,
-    messages: [
-      {
-        role: "user",
-        content: [
-          "以下の保険関連記事を日本語で150〜200字程度に要約してください。",
-          "重要なポイントを簡潔にまとめてください。",
-          "",
-          `タイトル: ${title}`,
-          "",
-          `記事内容:\n${content}`,
-        ].join("\n"),
-      },
-    ],
+    messages: [{
+      role: "user",
+      content: [
+        "以下の保険関連記事を日本語で150〜200字程度に要約してください。重要なポイントを簡潔にまとめてください。",
+        "",
+        `タイトル: ${title}`,
+        "",
+        `記事内容:\n${content}`,
+      ].join("\n"),
+    }],
   });
 
   const block = res.content[0];
@@ -152,11 +149,14 @@ async function summarizeArticle(
 }
 
 function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "unknown";
-  }
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch { return "unknown"; }
+}
+
+const MAX_ARTICLES = 5;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── Tool schemas ──────────────────────────────────────────────────────────────
@@ -164,16 +164,11 @@ function extractDomain(url: string): string {
 const TOOLS: Anthropic.Tool[] = [
   {
     name: "web_search",
-    description:
-      "Search for insurance news articles by keyword. Returns a list of articles with titles, URLs, and snippets.",
+    description: "Search for insurance news articles by keyword. Returns a list of articles with titles, URLs, and snippets.",
     input_schema: {
       type: "object",
       properties: {
-        query: {
-          type: "string",
-          description:
-            'Search query (e.g. "life insurance news 2025", "insurtech startup funding")',
-        },
+        query: { type: "string", description: 'e.g. "life insurance news 2025"' },
       },
       required: ["query"],
     },
@@ -184,102 +179,81 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: "object",
       properties: {
-        url: {
-          type: "string",
-          description: "The URL of the article to retrieve",
-        },
+        url: { type: "string", description: "Article URL" },
       },
       required: ["url"],
     },
   },
   {
     name: "summarize",
-    description:
-      "Summarize a news article in Japanese. Stores the result with category metadata.",
+    description: "Summarize a news article in Japanese and store it with category metadata.",
     input_schema: {
       type: "object",
       properties: {
-        title: {
-          type: "string",
-          description: "Article title",
-        },
-        content: {
-          type: "string",
-          description: "Full article text to summarize",
-        },
-        url: {
-          type: "string",
-          description: "Article URL",
-        },
-        category: {
-          type: "string",
-          description:
-            "News category: 生命保険 | 損害保険 | 再保険 | InsurTech",
-        },
+        title:    { type: "string", description: "Article title" },
+        content:  { type: "string", description: "Full article text" },
+        url:      { type: "string", description: "Article URL" },
+        category: { type: "string", description: "生命保険 | 損害保険 | 再保険 | InsurTech" },
       },
       required: ["title", "content", "url", "category"],
     },
   },
 ];
 
-// ── Main agent ────────────────────────────────────────────────────────────────
-
 const SYSTEM_PROMPT = `You are an AI agent that collects and analyzes global insurance industry news.
 
-Your task is to gather recent news from these four categories:
-1. 生命保険 (life insurance) — search: "life insurance news 2025"
-2. 損害保険 (property casualty insurance) — search: "property casualty insurance news 2025"
-3. 再保険 (reinsurance) — search: "reinsurance market news 2025"
-4. InsurTech — search: "insurtech startup innovation 2025"
+Collect at most ${MAX_ARTICLES} articles in total across these four categories:
+1. 生命保険 (life insurance)         — search: "life insurance news 2025"
+2. 損害保険 (property casualty)       — search: "property casualty insurance news 2025"
+3. 再保険 (reinsurance)               — search: "reinsurance market news 2025"
+4. InsurTech                          — search: "insurtech startup innovation 2025"
 
 For each category:
-- Use web_search to find recent articles
-- Pick 2–3 of the most relevant and recent articles
-- Use fetch_article to get the full content of each
-- Use summarize to create a Japanese summary, passing title, content, url, and the category name in Japanese
+- web_search to find recent articles
+- Pick 1–2 relevant articles; fetch_article to get full content
+- summarize with title, content, url, and the Japanese category name
 
-Work through all four categories systematically. When done, say "収集完了" and nothing else.`;
+Stop as soon as you have collected ${MAX_ARTICLES} articles total. When done, say "収集完了" only.`;
 
-async function runAgent(): Promise<void> {
-  console.log("\n保険ニュース自動収集 AI Agent");
-  console.log("=".repeat(60));
+// ── Main exported function ────────────────────────────────────────────────────
 
+export async function collectNews(
+  onEvent?: (event: AgentEvent) => void
+): Promise<CollectedArticle[]> {
   const collectedArticles: CollectedArticle[] = [];
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: "user",
-      content:
-        "世界の最新保険ニュースを4カテゴリ分収集し、各記事を日本語で要約してください。",
-    },
-  ];
+  const messages: Anthropic.MessageParam[] = [{
+    role: "user",
+    content: "世界の最新保険ニュースを4カテゴリ分収集し、各記事を日本語で要約してください。",
+  }];
 
-  const MAX_STEPS = 40;
-
-  for (let step = 1; step <= MAX_STEPS; step++) {
-    process.stdout.write(`\n[Step ${step}] `);
-
-    const response = await client.messages.create({
-      model: "claude-opus-4-6",
-      max_tokens: 4_096,
-      system: SYSTEM_PROMPT,
-      tools: TOOLS,
-      messages,
-    });
-
-    // Add assistant response to history
-    messages.push({ role: "assistant", content: response.content });
-
-    // Print any text blocks
-    for (const block of response.content) {
-      if (block.type === "text" && block.text.trim()) {
-        console.log(block.text.trim().slice(0, 200));
-      }
+  for (let step = 1; step <= 40; step++) {
+    if (collectedArticles.length >= MAX_ARTICLES) {
+      console.log(`最大記事数 (${MAX_ARTICLES}) に達しました。`);
+      break;
     }
 
-    if (response.stop_reason === "end_turn") break;
-    if (response.stop_reason !== "tool_use") break;
+    let response: Anthropic.Message;
+    try {
+      response = await client.messages.create({
+        model: "claude-opus-4-6",
+        max_tokens: 4_096,
+        system: SYSTEM_PROMPT,
+        tools: TOOLS,
+        messages,
+      });
+    } catch (err) {
+      if (err instanceof Anthropic.RateLimitError) {
+        console.warn(`Rate Limit エラー。${collectedArticles.length} 件を保存して終了します。`);
+        onEvent?.({ type: "error", message: `Rate limit を超過しました。${collectedArticles.length} 件を保存して終了します。` });
+        break;
+      }
+      throw err;
+    }
 
-    // Execute tool calls
+    messages.push({ role: "assistant", content: response.content });
+
+    if (response.stop_reason === "end_turn" || response.stop_reason !== "tool_use") break;
+
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
     for (const block of response.content) {
@@ -292,6 +266,8 @@ async function runAgent(): Promise<void> {
         switch (name) {
           case "web_search": {
             const { query } = input as { query: string };
+            console.log(`  [web_search] "${query}"`);
+            onEvent?.({ type: "search", query });
             const items = await webSearch(query);
             result = JSON.stringify(items, null, 2);
             break;
@@ -299,28 +275,48 @@ async function runAgent(): Promise<void> {
 
           case "fetch_article": {
             const { url } = input as { url: string };
+            console.log(`  [fetch_article] ${url.slice(0, 80)}...`);
+            onEvent?.({ type: "fetch", url });
             const article = await fetchArticle(url);
             result = JSON.stringify(article, null, 2);
             break;
           }
 
           case "summarize": {
-            const { title, content, url, category } = input as {
-              title: string;
-              content: string;
-              url: string;
-              category: string;
-            };
-            const summary = await summarizeArticle(title, content);
+            if (collectedArticles.length >= MAX_ARTICLES) {
+              result = `最大記事数 (${MAX_ARTICLES}) に達しました。`;
+              break;
+            }
 
-            collectedArticles.push({
-              title,
-              url,
-              source: extractDomain(url),
-              category,
-              summary,
+            const { title, content, url, category } = input as {
+              title: string; content: string; url: string; category: string;
+            };
+            console.log(`  [summarize] "${title.slice(0, 50)}..."`);
+            onEvent?.({ type: "summarize", title });
+
+            // ── Bug fix: inner try/catch so push() ALWAYS executes ────────
+            // If summarizeArticle throws (e.g. API error), the outer catch would
+            // swallow the error and skip collectedArticles.push entirely.
+            let summary: string;
+            try {
+              summary = await summarizeArticle(title, content);
+            } catch (sumErr) {
+              console.error("  [summarize] API error:", sumErr);
+              summary = "要約を生成できませんでした。";
+            }
+
+            const article: CollectedArticle = {
+              title, url, source: extractDomain(url), category, summary,
               collectedAt: new Date().toISOString(),
-            });
+            };
+
+            collectedArticles.push(article);           // always reached
+            onEvent?.({ type: "article", article });
+            console.log(`  収集済み: ${collectedArticles.length}/${MAX_ARTICLES} 件`);
+
+            if (collectedArticles.length < MAX_ARTICLES) {
+              await sleep(2_000);
+            }
 
             result = summary;
             break;
@@ -340,46 +336,43 @@ async function runAgent(): Promise<void> {
     messages.push({ role: "user", content: toolResults });
   }
 
-  // ── Display results ─────────────────────────────────────────────────────────
-
-  console.log("\n" + "=".repeat(60));
-  console.log("収集した保険ニュース一覧");
-  console.log("=".repeat(60));
-
-  if (collectedArticles.length === 0) {
-    console.log("記事を収集できませんでした。");
-  } else {
-    for (let i = 0; i < collectedArticles.length; i++) {
-      const a = collectedArticles[i];
-      console.log(`\n[${i + 1}] [${a.category}]`);
-      console.log(`    タイトル: ${a.title}`);
-      console.log(`    ソース  : ${a.source}`);
-      console.log(`    URL     : ${a.url}`);
-      console.log(`    要約    : ${a.summary}`);
-    }
-  }
-
-  // ── Save to JSON ─────────────────────────────────────────────────────────────
-
+  // Save to JSON
   const dataDir = path.join(__dirname, "..", "data");
   fs.mkdirSync(dataDir, { recursive: true });
 
   const dateStr = new Date().toISOString().split("T")[0];
-  const outputPath = path.join(dataDir, `insurance_news_${dateStr}.json`);
+  const savedPath = path.join(dataDir, `insurance_news_${dateStr}.json`);
 
-  const output = {
+  fs.writeFileSync(savedPath, JSON.stringify({
     generatedAt: new Date().toISOString(),
     totalArticles: collectedArticles.length,
     categories: ["生命保険", "損害保険", "再保険", "InsurTech"],
     articles: collectedArticles,
-  };
+  }, null, 2), "utf-8");
 
-  fs.writeFileSync(outputPath, JSON.stringify(output, null, 2), "utf-8");
-  console.log(`\n結果を保存しました: ${outputPath}`);
-  console.log(`合計 ${collectedArticles.length} 件の記事を収集しました。`);
+  console.log(`\n結果を保存: ${savedPath} (${collectedArticles.length} 件)`);
+  onEvent?.({ type: "complete", articles: collectedArticles, savedPath });
+
+  return collectedArticles;
 }
 
-runAgent().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// ── CLI entry point ───────────────────────────────────────────────────────────
+
+if (require.main === module) {
+  console.log("\n保険ニュース自動収集 AI Agent");
+  console.log("=".repeat(60));
+
+  collectNews().then((articles) => {
+    console.log("\n" + "=".repeat(60));
+    for (let i = 0; i < articles.length; i++) {
+      const a = articles[i];
+      console.log(`\n[${i + 1}] [${a.category}] ${a.title}`);
+      console.log(`    ${a.source} | ${a.url}`);
+      console.log(`    ${a.summary}`);
+    }
+    console.log(`\n合計 ${articles.length} 件`);
+  }).catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

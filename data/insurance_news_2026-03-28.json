@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-03-28T07:53:52.503Z",
+  "totalArticles": 5,
+  "categories": [
+    "生命保険",
+    "損害保険",
+    "再保険",
+    "InsurTech"
+  ],
+  "articles": [
+    {
+      "title": "Corebridge and Equitable to merge in all-stock deal valuing combined company at $22bn",
+      "url": "https://www.reinsurancene.ws/corebridge-and-equitable-to-merge-in-all-stock-deal-valuing-combined-company-at-22bn/",
+      "source": "reinsurancene.ws",
+      "category": "生命保険",
+      "summary": "**要約：**\n\n米国の金融サービス企業コアブリッジ・フィナンシャルとエクイタブル・ホールディングスは、全額株式交換方式で合併する最終合意を発表した。合併後の企業価値は約220億ドルで、運用・管理資産は1.5兆ドルに達し、退職・生命保険・資産運用分野で巨大企業が誕生する。合併後はエクイタブルのブランド名で運営され、コアブリッジ現CEOが新会社を率いる。株主比率はコアブリッジ側約51%、エクイタブル側約49%となり、2026年末までの完了を見込む。日本生命も長期的な戦略的投資家として支持を表明した。",
+      "collectedAt": "2026-03-28T07:53:18.254Z"
+    },
+    {
+      "title": "Total losses from March Kona Storms in Hawaii said to be at least $1bn: Aon",
+      "url": "https://www.reinsurancene.ws/total-losses-from-march-kona-storms-in-hawaii-said-to-be-at-least-1bn-aon/",
+      "source": "reinsurancene.ws",
+      "category": "損害保険",
+      "summary": "**要約：**\n\n保険ブローカー大手Aonの報告によると、2024年3月10〜24日にハワイを襲った連続コナ・ストームによる経済的・保険損害額は少なくとも10億ドルに達する見通し。記録的豪雨により、特にオアフ島北部で鉄砲水や地滑りが発生し、数百戸の住宅、農地、道路、学校、病院、空港が被害を受けた。2週間の総降水量は最大約1.3メートルに及び、2004年以来最大の降雨となった。約5,500人に避難命令が出され、230人が救助された。今後、被害額はさらに増加する可能性がある。",
+      "collectedAt": "2026-03-28T07:53:27.012Z"
+    },
+    {
+      "title": "Swiss Re flags accumulation risk in data centres as key underwriting challenge",
+      "url": "https://www.reinsurancene.ws/swiss-re-flags-accumulation-risk-in-data-centres-as-key-underwriting-challenge/",
+      "source": "reinsurancene.ws",
+      "category": "再保険",
+      "summary": "## 要約\n\nスイス再保険（Swiss Re）の報告によると、AI インフラを支えるデータセンターは大規模化・複雑化が進み、単一施設にリスクが集中する「累積リスク」が保険引受上の主要課題となっている。データセンター関連の世界の保険料は2030年までに242億ドルに達する見通しで、冷却故障による水損、電力供給の脆弱性、新たな火災発生源などリスクも多様化している。大規模施設では複数のテナントが共通インフラに依存しており、単一事故で複数の保険請求が同時発生する可能性が高い。Swiss Reは累積リスクの透明性確保と高度な多層的リスク対策の必要性を強調した。",
+      "collectedAt": "2026-03-28T07:53:35.475Z"
+    },
+    {
+      "title": "Continued Middle East conflict drives 'new equilibrium' in terrorism and political violence reinsurance: WTW",
+      "url": "https://www.reinsurancene.ws/continued-middle-east-conflict-drives-new-equilibrium-in-terrorism-and-political-violence-reinsurance-wtw/",
+      "source": "reinsurancene.ws",
+      "category": "再保険",
+      "summary": "**要約：**\n\nWTWによると、中東紛争の長期化がテロリズム・政治暴力関連の再保険市場に「新たな均衡」をもたらしている。保険会社は引き続きソリューションを提供しているが、引受枠の縮小、条件の厳格化、料率の上昇が見られる。紛争が悪化すれば、引受停止やMENA地域を超えた世界的な影響も懸念される。現時点ではMENA地域外の引受能力はほぼ維持されており、ウクライナ戦争時と異なり再保険会社は地域全体の包括的除外条項を導入する意向は示していない。保険会社は包括的な条約制限ではなく、集積管理を通じてエクスポージャーを管理している。",
+      "collectedAt": "2026-03-28T07:53:44.426Z"
+    },
+    {
+      "title": "Infosys set to acquire insurance technology provider, Stratus",
+      "url": "https://www.reinsurancene.ws/infosys-set-to-acquire-insurance-technology-provider-stratus/",
+      "source": "reinsurancene.ws",
+      "category": "InsurTech",
+      "summary": "**要約：**\n\nデジタルサービス大手のInfosysが、損害保険（P&C）業界向けテクノロジー企業Stratusの買収を予定している（2027年度第1四半期完了見込み）。Stratusは米国拠点のGuidewire Softwareパートナーで、保険プラットフォームの導入・クラウド移行等を提供。本買収によりInfosysは保険分野での地位を強化し、AI活用によるデジタル・データ変革を加速させる。損害保険業界では引受・請求・不正検知等でAI導入が進んでおり、Stratusの専門知識とInfosysのグローバル展開力の統合で顧客支援を拡大する狙いがある。",
+      "collectedAt": "2026-03-28T07:53:52.501Z"
+    }
+  ]
+}

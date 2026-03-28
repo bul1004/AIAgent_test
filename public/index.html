@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>保険ニュース収集 AI Agent</title>
+  <style>
+    :root {
+      --navy:    #1e3a5f;
+      --navy-d:  #162d4a;
+      --blue:    #2563eb;
+      --blue-h:  #1d4ed8;
+      --green:   #16a34a;
+      --purple:  #7c3aed;
+      --orange:  #ea580c;
+      --bg:      #f1f5f9;
+      --surface: #ffffff;
+      --border:  #e2e8f0;
+      --muted:   #64748b;
+      --text:    #0f172a;
+      --r:       10px;
+      --sh:      0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+      --sh-md:   0 4px 6px -1px rgba(0,0,0,.08), 0 2px 4px -2px rgba(0,0,0,.05);
+      --sh-lg:   0 10px 15px -3px rgba(0,0,0,.08), 0 4px 6px -4px rgba(0,0,0,.05);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 0 28px;
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: var(--sh-md);
+    }
+    .hd-left { display: flex; align-items: center; gap: 12px; }
+    .hd-icon { font-size: 22px; }
+    .hd-title { font-size: 17px; font-weight: 700; letter-spacing: -.3px; }
+    .hd-sub { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
+
+    .btn-collect {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 8px;
+      padding: 9px 22px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: background .15s, transform .1s, opacity .2s;
+    }
+    .btn-collect:hover:not(:disabled) { background: var(--blue-h); }
+    .btn-collect:active:not(:disabled) { transform: scale(.97); }
+    .btn-collect:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-icon { font-size: 12px; }
+
+    /* ── Progress panel ── */
+    #progress {
+      background: #0d1b2e;
+      color: #94a3b8;
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height .35s ease;
+    }
+    #progress.open { max-height: 220px; }
+    .progress-inner {
+      padding: 14px 28px 16px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .progress-inner::-webkit-scrollbar { width: 4px; }
+    .progress-inner::-webkit-scrollbar-track { background: #1e293b; }
+    .progress-inner::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    .progress-head {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px; font-size: 13px; font-weight: 600; color: #e2e8f0;
+    }
+    .spinner {
+      width: 14px; height: 14px; flex-shrink: 0;
+      border: 2px solid #1e3a5f;
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    .spinner.done { animation: none; border-color: #22c55e; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .log-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+    .log-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; }
+    .log-badge {
+      flex-shrink: 0; margin-top: 1px;
+      padding: 1px 7px; border-radius: 4px;
+      font-size: 10px; font-weight: 700; letter-spacing: .3px;
+    }
+    .badge-search   { background: #162d4a; color: #60a5fa; }
+    .badge-fetch    { background: #14291f; color: #4ade80; }
+    .badge-summarize{ background: #2a1060; color: #c084fc; }
+    .badge-article  { background: #3b1202; color: #fb923c; }
+    .log-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+    /* ── Main ── */
+    main { max-width: 1240px; margin: 0 auto; padding: 28px 24px; }
+
+    /* ── Top bar ── */
+    .top-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .count-label { font-size: 14px; color: var(--muted); }
+    .count-label strong { color: var(--text); font-size: 18px; font-weight: 700; }
+    .updated-label { font-size: 12px; color: var(--muted); }
+
+    /* ── Category tabs ── */
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+    .tab {
+      padding: 7px 16px; border-radius: 20px;
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      font-size: 13px; font-weight: 500; color: var(--muted);
+      cursor: pointer; transition: all .15s;
+    }
+    .tab:hover { border-color: var(--blue); color: var(--blue); }
+    .tab.active { background: var(--navy); border-color: var(--navy); color: #fff; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center; padding: 80px 24px; color: var(--muted);
+    }
+    .empty-icon { font-size: 52px; margin-bottom: 16px; }
+    .empty-title { font-size: 18px; font-weight: 600; color: #475569; margin-bottom: 8px; }
+    .empty-desc { font-size: 14px; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 20px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      box-shadow: var(--sh);
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 12px;
+      transition: box-shadow .2s, transform .2s;
+      animation: fadeUp .3s ease;
+    }
+    .card:hover { box-shadow: var(--sh-lg); transform: translateY(-3px); }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .cat-badge {
+      display: inline-block; width: fit-content;
+      padding: 3px 10px; border-radius: 12px;
+      font-size: 11px; font-weight: 700; letter-spacing: .3px;
+    }
+    .cat-life { background: #dbeafe; color: #1d4ed8; }
+    .cat-pc   { background: #dcfce7; color: #166534; }
+    .cat-re   { background: #f3e8ff; color: #6d28d9; }
+    .cat-tech { background: #fff7ed; color: #c2410c; }
+    .cat-other{ background: #f1f5f9; color: #475569; }
+
+    .card-title {
+      font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.45;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .card-summary {
+      font-size: 13px; color: var(--muted); line-height: 1.65; flex: 1;
+      display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 12px; border-top: 1px solid var(--border);
+    }
+    .card-source { font-size: 12px; color: var(--muted); }
+    .card-link {
+      font-size: 13px; font-weight: 600; color: var(--blue);
+      text-decoration: none; display: flex; align-items: center; gap: 4px;
+      transition: gap .15s;
+    }
+    .card-link:hover { gap: 8px; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #14532d; color: #fff;
+      padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; font-weight: 500;
+      box-shadow: var(--sh-lg);
+      transform: translateY(80px); opacity: 0;
+      transition: transform .3s, opacity .3s; z-index: 200;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+
+    @media (max-width: 600px) {
+      header { padding: 0 16px; }
+      .hd-sub, .hd-title { font-size: 14px; }
+      main { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="hd-left">
+    <span class="hd-icon">🌐</span>
+    <div>
+      <div class="hd-title">保険ニュース収集 AI Agent</div>
+      <div class="hd-sub">生命保険 · 損害保険 · 再保険 · InsurTech</div>
+    </div>
+  </div>
+  <button class="btn-collect" id="collectBtn" onclick="startCollection()">
+    <span class="btn-icon" id="btnIcon">▶</span>
+    <span id="btnLabel">収集開始</span>
+  </button>
+</header>
+
+<div id="progress">
+  <div class="progress-inner">
+    <div class="progress-head">
+      <div class="spinner" id="spinner"></div>
+      <span id="progressTitle">ニュースを収集しています...</span>
+    </div>
+    <ul class="log-list" id="logList"></ul>
+  </div>
+</div>
+
+<main>
+  <div class="top-bar">
+    <div class="count-label"><strong id="countNum">0</strong> 件の記事</div>
+    <div class="updated-label" id="updatedLabel"></div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-cat="all"   onclick="filter('all')">すべて</button>
+    <button class="tab"        data-cat="生命保険" onclick="filter('生命保険')">生命保険</button>
+    <button class="tab"        data-cat="損害保険" onclick="filter('損害保険')">損害保険</button>
+    <button class="tab"        data-cat="再保険"  onclick="filter('再保険')">再保険</button>
+    <button class="tab"        data-cat="InsurTech" onclick="filter('InsurTech')">InsurTech</button>
+  </div>
+
+  <div class="empty" id="empty">
+    <div class="empty-icon">📰</div>
+    <div class="empty-title">ニュースがありません</div>
+    <div class="empty-desc">「収集開始」ボタンを押して最新の保険ニュースを取得してください</div>
+  </div>
+
+  <div class="grid" id="grid" style="display:none"></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  let articles = [];
+  let currentCat = 'all';
+
+  // ── Category helpers ───────────────────────────────────────────────────────
+
+  function catClass(cat) {
+    if (!cat) return 'cat-other';
+    if (cat.includes('生命')) return 'cat-life';
+    if (cat.includes('損害')) return 'cat-pc';
+    if (cat.includes('再保険')) return 'cat-re';
+    if (/insurtech/i.test(cat)) return 'cat-tech';
+    return 'cat-other';
+  }
+
+  // ── DOM helpers ────────────────────────────────────────────────────────────
+
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function makeCard(a) {
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.dataset.cat = a.category;
+    d.innerHTML = `
+      <span class="cat-badge ${catClass(a.category)}">${esc(a.category)}</span>
+      <div class="card-title">${esc(a.title)}</div>
+      <div class="card-summary">${esc(a.summary)}</div>
+      <div class="card-footer">
+        <span class="card-source">${esc(a.source)}</span>
+        ${a.url ? `<a class="card-link" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">記事を読む →</a>` : ''}
+      </div>`;
+    return d;
+  }
+
+  function addLog(type, text) {
+    const labels = { search:'検索', fetch:'取得', summarize:'要約', article:'完了' };
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `<span class="log-badge badge-${type}">${labels[type]??type}</span><span class="log-text">${esc(text)}</span>`;
+    const list = document.getElementById('logList');
+    list.appendChild(li);
+    list.parentElement.scrollTop = list.parentElement.scrollHeight;
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  function renderGrid() {
+    const grid  = document.getElementById('grid');
+    const empty = document.getElementById('empty');
+    const shown = currentCat === 'all' ? articles : articles.filter(a => a.category === currentCat);
+
+    if (shown.length === 0) {
+      grid.style.display = 'none';
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      grid.style.display  = 'grid';
+      grid.innerHTML = '';
+      shown.forEach(a => grid.appendChild(makeCard(a)));
+    }
+  }
+
+  function appendCard(a) {
+    articles.push(a);
+    document.getElementById('countNum').textContent = articles.length;
+
+    const grid  = document.getElementById('grid');
+    const empty = document.getElementById('empty');
+    if (currentCat === 'all' || a.category === currentCat) {
+      grid.style.display  = 'grid';
+      empty.style.display = 'none';
+      grid.appendChild(makeCard(a));
+    }
+  }
+
+  // ── Category filter ────────────────────────────────────────────────────────
+
+  function filter(cat) {
+    currentCat = cat;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+    renderGrid();
+  }
+
+  // ── Collection ─────────────────────────────────────────────────────────────
+
+  function startCollection() {
+    articles = [];
+    document.getElementById('countNum').textContent = '0';
+    document.getElementById('logList').innerHTML = '';
+    renderGrid();
+
+    const btn      = document.getElementById('collectBtn');
+    const icon     = document.getElementById('btnIcon');
+    const label    = document.getElementById('btnLabel');
+    const progress = document.getElementById('progress');
+    const spinner  = document.getElementById('spinner');
+    const ptitle   = document.getElementById('progressTitle');
+
+    btn.disabled = true;
+    icon.innerHTML = '<span class="spinner" style="width:11px;height:11px;border-top-color:#fff;margin:0;"></span>';
+    label.textContent = '収集中...';
+    progress.classList.add('open');
+    spinner.classList.remove('done');
+    ptitle.textContent = 'ニュースを収集しています...';
+
+    const es = new EventSource('/api/collect');
+
+    es.onmessage = e => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+
+      switch (data.type) {
+        case 'search':    addLog('search',    `"${data.query}"`); break;
+        case 'fetch':     addLog('fetch',     data.url); break;
+        case 'summarize': addLog('summarize', data.title); break;
+        case 'article':
+          addLog('article', data.article.title);
+          appendCard(data.article);
+          break;
+        case 'complete':
+        case 'done':
+          es.close();
+          btn.disabled = false;
+          icon.textContent = '▶';
+          label.textContent = '収集開始';
+          spinner.classList.add('done');
+          ptitle.textContent = `収集完了 — ${articles.length} 件取得`;
+          document.getElementById('updatedLabel').textContent =
+            `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+          showToast(`✓ ${articles.length} 件のニュースを収集しました`);
+          setTimeout(() => progress.classList.remove('open'), 6000);
+          break;
+        case 'error':
+          es.close();
+          btn.disabled = false;
+          icon.textContent = '▶';
+          label.textContent = '収集開始';
+          ptitle.textContent = `エラー: ${data.message}`;
+          spinner.classList.add('done');
+          break;
+      }
+    };
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) return;
+      es.close();
+      btn.disabled = false;
+      icon.textContent = '▶';
+      label.textContent = '収集開始';
+      ptitle.textContent = '接続エラーが発生しました';
+    };
+  }
+
+  // ── On load: fetch previously saved news ──────────────────────────────────
+
+  fetch('/api/news/latest')
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (!data || !data.articles?.length) return;
+      articles = data.articles;
+      document.getElementById('countNum').textContent = articles.length;
+      if (data.generatedAt) {
+        document.getElementById('updatedLabel').textContent =
+          `最終更新: ${new Date(data.generatedAt).toLocaleString('ja-JP')}`;
+      }
+      renderGrid();
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>
